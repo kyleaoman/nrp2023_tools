@@ -49,6 +49,7 @@ def get_snepshots_and_times(t, sneplist, timelist, snipflags):
 def _db(
     snep,
     ptype="dm",
+    extra_fields=tuple(),
     box_centre=None,
     box_halflength=None,
     fade_beyond=None,
@@ -70,13 +71,17 @@ def _db(
             ("y", np.float),
             ("z", np.float),
             ("m", np.float),
-        ],
+            ("hsm", np.float),
+        ]
+        + [(extra_field, np.float) for extra_field in extra_fields],
     )
     db["id"] = snep[f"ids_{ptype}"][boxmask]
     db["x"] = snep[f"xyz_{ptype}"][:, 0][boxmask]
     db["y"] = snep[f"xyz_{ptype}"][:, 1][boxmask]
     db["z"] = snep[f"xyz_{ptype}"][:, 2][boxmask]
     db["m"] = snep[f"m_{ptype}"][boxmask]
+    for extra_field in extra_fields:
+        db[extra_field] = snep[f"{extra_field}_{ptype}"][boxmask]
     if (fade_beyond is not None) and (fade_centre is not None):
         r = np.sqrt(
             np.sum(
@@ -204,6 +209,7 @@ class snep_interpolator(object):
         self,
         t,
         ptype="dm",
+        extra_fields=tuple(),
         box_centre=None,
         box_halflength=None,
         fade_beyond=None,
@@ -214,8 +220,6 @@ class snep_interpolator(object):
             t, self.sneplist, self.timelist, self.snipflags
         )
         # check if already has in memory
-        # print(s0)
-        # print(s1)
         if (
             (self.earlier_snep is not None)
             and (self.later_snep is not None)
@@ -229,6 +233,7 @@ class snep_interpolator(object):
             db0 = _db(
                 self.earlier_snep,
                 ptype=ptype,
+                extra_fields=extra_fields,
                 box_centre=box_centre,
                 box_halflength=box_halflength,
                 fade_beyond=fade_beyond,
@@ -237,6 +242,7 @@ class snep_interpolator(object):
             db1 = _db(
                 self.later_snep,
                 ptype=ptype,
+                extra_fields=extra_fields,
                 box_centre=box_centre,
                 box_halflength=box_halflength,
                 fade_beyond=fade_beyond,
@@ -257,6 +263,7 @@ class snep_interpolator(object):
                 db0 = _db(
                     self.earlier_snep,
                     ptype=ptype,
+                    extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
                     fade_beyond=fade_beyond,
@@ -265,6 +272,7 @@ class snep_interpolator(object):
                 db1 = _db(
                     self.later_snep,
                     ptype=ptype,
+                    extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
                     fade_beyond=fade_beyond,
@@ -278,6 +286,7 @@ class snep_interpolator(object):
                 db0 = _db(
                     self.earlier_snep,
                     ptype=ptype,
+                    extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
                     fade_beyond=fade_beyond,
@@ -289,6 +298,7 @@ class snep_interpolator(object):
                 db1 = _db(
                     self.later_snep,
                     ptype=ptype,
+                    extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
                     fade_beyond=fade_beyond,
@@ -316,11 +326,18 @@ class snep_interpolator(object):
         ) / (
             t1 - t0
         )
-        m = np.array(
-            self.db["m_earlier"]
-            + (self.db["m_later"] - self.db["m_earlier"]) * (t - t0) / (t1 - t0)
+
+        return dict(
+            xyz=xyz,
+            m=self.interpolate_scalar("m", t, t0, t1),
+            **{q: self.interpolate_scalar(q, t, t0, t1) for q in extra_fields},
         )
-        return sphviewer.Particles(xyz, mass=m)
+
+    def interpolate_scalar(self, q, t, t0, t1):
+        return np.array(
+            self.db[f"{q}_earlier"]
+            + (self.db[f"{q}_later"] - self.db[f"{q}_earlier"]) * (t - t0) / (t1 - t0)
+        )
 
 
 class cam_interpolator(object):
@@ -449,11 +466,27 @@ def init_tree_cache(res_phys_vol=None, fof_sub=None, save_dir="out", **kwargs):
     return
 
 
+def default_render(pdata, camera_location):
+    if "hsm" in pdata.keys():
+        P = sphviewer.Particles(pdata["xyz"], mass=pdata["m"], hsm=pdata["hsm"])
+    else:
+        P = sphviewer.Particles(pdata["xyz"], mass=pdata["m"])
+    C = sphviewer.Camera()
+    C.set_params(**camera_location)
+    S = sphviewer.Scene(P, Camera=C)
+    R = sphviewer.Render(S)
+    R.set_logscale()
+    img_arr = R.get_image()
+    return (img_arr,)
+
+
 def make_frames_face_and_edge(
     res_phys_vol=None,
     fof_sub=None,
     ptype="g",
+    extra_fields=tuple(),
     save_dir="out",
+    render_function=default_render,
     r=100,
     npixels_x=1000,
     npixels_y=1000,
@@ -461,6 +494,7 @@ def make_frames_face_and_edge(
     end_time=13.759 * U.Gyr,
     Nframes=400,
     zoom=1,
+    extent=None,
     segment=0,
     Nsegments=1,
     ncpu=1,
@@ -509,13 +543,13 @@ def make_frames_face_and_edge(
     anchors_face["p"] = phi_list_face
     anchors_face["roll"] = roll_list_face
     anchors_face["zoom"] = [zoom] + ["same"] * (Nframes - 1)
-    anchors_face["extent"] = [None] + ["same"] * (Nframes - 1)
+    anchors_face["extent"] = [extent] + ["same"] * (Nframes - 1)
 
     anchors_edge["t"] = theta_list_edge
     anchors_edge["p"] = phi_list_edge
     anchors_edge["roll"] = roll_list_edge
     anchors_edge["zoom"] = [zoom] + ["same"] * (Nframes - 1)
-    anchors_edge["extent"] = [None] + ["same"] * (Nframes - 1)
+    anchors_edge["extent"] = [extent] + ["same"] * (Nframes - 1)
 
     camera_trajectory = dict(
         face=camera_tools.get_camera_trajectory(targets_face, anchors_face),
@@ -536,25 +570,23 @@ def make_frames_face_and_edge(
             camera_location = camera_trajectory[alignment][h]
             camera_location["xsize"] = npixels_x
             camera_location["ysize"] = npixels_y
-            C = sphviewer.Camera()
-            C.set_params(**camera_location)
-            img_arr_file = f"{save_dir}/{ptype}_{h:04d}_{alignment}.npy"
-            if not os.path.isfile(img_arr_file):
+            img_arr_file = f"{save_dir}/{ptype}_{h:04d}_{alignment}"
+            if not os.path.isfile(f"{img_arr_file}_0.npy"):
                 print(f"frame {h}, {alignment}-on ({ptype})", datetime.now())
-                P = SI(  # calls __call__
+                pdata = SI(  # calls __call__
                     camera_location["sim_times"],
                     ptype=ptype,
+                    extra_fields=extra_fields,
                     box_centre=CI(camera_location["sim_times"]),
                     box_halflength=50 * 7,  # exp(-7)~1E-3
                     fade_beyond=50,
                     fade_centre=CI(camera_location["sim_times"]),
                 )
-                S = sphviewer.Scene(P, Camera=C)
-                R = sphviewer.Render(S)
-                R.set_logscale()
-                img_arr = R.get_image()
+                img_arrs = render_function(pdata, camera_location)
+
                 print(f"saving frame {h} {alignment}-on ({ptype})", datetime.now())
-                np.save(img_arr_file, img_arr)
+                for fnum, img_arr in enumerate(img_arrs):
+                    np.save(f"{img_arr_file}_{fnum}.npy", img_arr)
             else:
                 print(f"skipping {img_arr_file}, already exists")
 
@@ -813,8 +845,8 @@ def find_snap_rotations(
 
 def assemble_edge_and_face_video(Nframes=400, save_dir="out", ptype="g", **kwargs):
     # use face-on as reference for pixel values
-    pixels_early = np.load(f"{save_dir}/{ptype}_{0:04d}_face.npy")
-    pixels_late = np.load(f"{save_dir}/{ptype}_{Nframes - 2:04d}_face.npy")
+    pixels_early = np.load(f"{save_dir}/{ptype}_{0:04d}_face_0.npy")
+    pixels_late = np.load(f"{save_dir}/{ptype}_{Nframes - 2:04d}_face_0.npy")
     vmin_early = pixels_early.min()
     vmin_late = pixels_late.min()
     vmax_early = pixels_early.max()
@@ -825,8 +857,8 @@ def assemble_edge_and_face_video(Nframes=400, save_dir="out", ptype="g", **kwarg
         if os.path.exists(png_file):
             print(f"{png_file} already exists, skipping.")
             continue
-        file_f = f"{save_dir}/{ptype}_{n:04d}_face.npy"
-        file_e = f"{save_dir}/{ptype}_{n:04d}_edge.npy"
+        file_f = f"{save_dir}/{ptype}_{n:04d}_face_0.npy"
+        file_e = f"{save_dir}/{ptype}_{n:04d}_edge_0.npy"
         pixels_f = np.load(file_f)
         pixels_e = np.load(file_e)
         rgb_f = cm.magma(
