@@ -71,7 +71,6 @@ def _db(
             ("y", np.float),
             ("z", np.float),
             ("m", np.float),
-            ("hsm", np.float),
         ]
         + [(extra_field, np.float) for extra_field in extra_fields],
     )
@@ -119,7 +118,8 @@ class snep_interpolator(object):
                 with h5py.File(h5file) as f:
                     a = f["Header"].attrs["Time"]
             except OSError:
-                print("error")
+                if self.verbose:
+                    print(f"error, {h5file} not found")
                 continue
             timelist.append(a)
             sneplist.append(s)
@@ -148,7 +148,7 @@ class snep_interpolator(object):
 
         return
 
-    def _loadsnep(self, snep, buffer="later", ptype="dm", is_snip=False):
+    def _loadsnep(self, snep, buffer="later", ptype="dm", is_snip=False, extra_fields=tuple()):
         if is_snip:
             mysnep = snip_id(*self.res_phys_vol, snip=snep, is_snip=True)
         else:
@@ -188,6 +188,9 @@ class snep_interpolator(object):
             data["xyz_s"][data["xyz_s"] < 0] += Lbox
         else:
             raise ValueError
+        for extra_field in extra_fields:
+            SF.load((f"{extra_field}_{ptype}", ), verbose=self.verbose)
+            data[f"{extra_field}_{ptype}"] = SF[f"{extra_field}_{ptype}"]
         if buffer == "earlier":
             self.earlier_snep = data
         elif buffer == "later":
@@ -259,7 +262,7 @@ class snep_interpolator(object):
                 and (self.later_snep["is_snip"] == is0)
             ):
                 self.earlier_snep = self.later_snep
-                self._loadsnep(s1, buffer="later", ptype=ptype, is_snip=is1)
+                self._loadsnep(s1, buffer="later", ptype=ptype, is_snip=is1, extra_fields=extra_fields)
                 db0 = _db(
                     self.earlier_snep,
                     ptype=ptype,
@@ -282,7 +285,7 @@ class snep_interpolator(object):
                     self._unload(0)
                     self._unload(1)
             else:
-                self._loadsnep(s0, buffer="earlier", ptype=ptype, is_snip=is0)
+                self._loadsnep(s0, buffer="earlier", ptype=ptype, is_snip=is0, extra_fields=extra_fields)
                 db0 = _db(
                     self.earlier_snep,
                     ptype=ptype,
@@ -294,7 +297,7 @@ class snep_interpolator(object):
                 )
                 if unload:
                     self._unload(0)
-                self._loadsnep(s1, buffer="later", ptype=ptype, is_snip=is1)
+                self._loadsnep(s1, buffer="later", ptype=ptype, is_snip=is1, extra_fields=extra_fields)
                 db1 = _db(
                     self.later_snep,
                     ptype=ptype,
@@ -498,8 +501,9 @@ def make_frames_face_and_edge(
     segment=0,
     Nsegments=1,
     ncpu=1,
+    verbose=False,
 ):
-    SI = snep_interpolator(res_phys_vol, fof_sub, ncpu=ncpu)
+    SI = snep_interpolator(res_phys_vol, fof_sub, ncpu=ncpu, verbose=verbose)
     CI = cam_interpolator(res_phys_vol, fof_sub, cache_dir=f"{save_dir}/tree/")
     anchors_face = {}
     anchors_face["sim_times"] = t_to_a(np.linspace(start_time, end_time, Nframes))
@@ -582,7 +586,11 @@ def make_frames_face_and_edge(
                     fade_beyond=50,
                     fade_centre=CI(camera_location["sim_times"]),
                 )
+                if verbose:
+                    print("Starting rendering.")
                 img_arrs = render_function(pdata, camera_location)
+                if verbose:
+                    print("Rendering finished.")
 
                 print(f"saving frame {h} {alignment}-on ({ptype})", datetime.now())
                 for fnum, img_arr in enumerate(img_arrs):
@@ -769,9 +777,10 @@ def find_snap_rotations(
     segment=0,
     Nsegments=1,
     ncpu=1,
+    verbose=False,
     **kwargs,
 ):
-    SI = snep_interpolator(res_phys_vol, fof_sub, ncpu=ncpu)
+    SI = snep_interpolator(res_phys_vol, fof_sub, ncpu=ncpu, verbose=verbose)
     obj_id = namedtuple("obj_id", ["fof", "sub"])
     tree_id = np.load(
         "{:s}/tree/tree_idlist_{:d}_{:s}_{:d}_{:d}_{:d}.npy".format(
