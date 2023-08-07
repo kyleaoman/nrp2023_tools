@@ -67,12 +67,12 @@ def _db(
         (dbsize,),
         dtype=[
             ("id", np.int64),
-            ("x", np.float),
-            ("y", np.float),
-            ("z", np.float),
-            ("m", np.float),
+            ("x", float),
+            ("y", float),
+            ("z", float),
+            ("m", float),
         ]
-        + [(extra_field, np.float) for extra_field in extra_fields],
+        + [(extra_field, float) for extra_field in extra_fields],
     )
     db["id"] = snep[f"ids_{ptype}"][boxmask]
     db["x"] = snep[f"xyz_{ptype}"][:, 0][boxmask]
@@ -365,8 +365,10 @@ class snep_interpolator(object):
 
 class cam_interpolator(object):
     def __init__(self, res_phys_vol, fof_sub, cache_dir="cache"):
-        if not os.path.exists(cache_dir):
+        try:
             os.mkdir(cache_dir)
+        except FileExistsError:
+            pass
         self.res_phys_vol = res_phys_vol
         self.t_cachename = "{:s}/tree_timelist_{:d}_{:s}_{:d}_{:d}_{:d}.npy".format(
             cache_dir, *res_phys_vol, *fof_sub
@@ -481,10 +483,14 @@ def clean_angle_list(angle_list):
 
 
 def init_tree_cache(res_phys_vol=None, fof_sub=None, save_dir="out", **kwargs):
-    if not os.path.exists(f"{save_dir}"):
+    try:
         os.mkdir(f"{save_dir}")
-    if not os.path.exists(f"{save_dir}/tree"):
+    except FileExistsError:
+        pass
+    try:
         os.mkdir(f"{save_dir}/tree")
+    except FileExistsError:
+        pass
     cam_interpolator(res_phys_vol, fof_sub, cache_dir=f"{save_dir}/tree")
     return
 
@@ -521,8 +527,13 @@ def make_frames_face_and_edge(
     segment=0,
     Nsegments=1,
     ncpu=1,
+    overwrite=False,
     verbose=False,
+    file_prefix=None,
 ):
+    if file_prefix is None:
+        file_prefix = ptype
+
     SI = snep_interpolator(res_phys_vol, fof_sub, ncpu=ncpu, verbose=verbose)
     CI = cam_interpolator(res_phys_vol, fof_sub, cache_dir=f"{save_dir}/tree/")
     anchors_face = {}
@@ -594,8 +605,8 @@ def make_frames_face_and_edge(
             camera_location = camera_trajectory[alignment][h]
             camera_location["xsize"] = npixels_x
             camera_location["ysize"] = npixels_y
-            img_arr_file = f"{save_dir}/{ptype}_{h:04d}_{alignment}"
-            if not os.path.isfile(f"{img_arr_file}_0.npy"):
+            img_arr_file = f"{save_dir}/{file_prefix}_{h:04d}_{alignment}"
+            if not os.path.isfile(f"{img_arr_file}_0.npy") or overwrite:
                 print(f"frame {h}, {alignment}-on ({ptype})", datetime.now())
                 pdata = SI(  # calls __call__
                     camera_location["sim_times"],
@@ -809,8 +820,10 @@ def find_snap_rotations(
     )
     time_gyr = np.linspace(start_time, end_time, Nframes).to_value()
     times = t_to_a(np.linspace(start_time, end_time, Nframes))
-    if not os.path.exists(f"{save_dir}/angles"):
+    try:
         os.mkdir(f"{save_dir}/angles")
+    except FileExistsError:
+        pass
     np.save(f"{save_dir}/angles/frame_times.npy", time_gyr)
     start_seg_idx = segment * (Nframes // Nsegments)
     end_seg_idx = (segment + 1) * (Nframes // Nsegments)
