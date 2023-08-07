@@ -26,23 +26,24 @@ from matplotlib import cm
 obj_id = namedtuple("obj_id", ["fof", "sub"])
 
 
-def get_snepshots_and_times(t, sneplist, timelist, snipflags):
-    index_after = np.searchsorted(timelist, t)
+def get_snepshots_and_times(t, sneplist, timelist, snipflags, snap_only=False):
+    snap_mask = np.logical_not(snipflags) if snap_only else np.s_[...]
+    index_after = np.searchsorted(timelist[snap_mask], t)
     index_before = index_after - 1
     if index_before < 0:
         index_before = 0
-    if index_before >= len(sneplist):
-        index_before == len(sneplist) - 1
-    if index_after >= len(sneplist):
-        index_after == len(sneplist) - 1
+    if index_before >= len(sneplist[snap_mask]):
+        index_before == len(sneplist[snap_mask]) - 1
+    if index_after >= len(sneplist[snap_mask]):
+        index_after == len(sneplist[snap_mask]) - 1
 
     return (
-        sneplist[index_before],
-        sneplist[index_after],
-        snipflags[index_before],
-        snipflags[index_after],
-        timelist[index_before],
-        timelist[index_after],
+        sneplist[snap_mask][index_before],
+        sneplist[snap_mask][index_after],
+        snipflags[snap_mask][index_before],
+        snipflags[snap_mask][index_after],
+        timelist[snap_mask][index_before],
+        timelist[snap_mask][index_after],
     )
 
 
@@ -63,6 +64,23 @@ def _db(
     else:
         boxmask = np.s_[:]
         dbsize = snep[f"xyz_{ptype}"].shape[0]
+    if len(snep["fields_from_snap"]) > 0:
+        snap_db = np.recarray(
+            (len(snep[f"snap_ids_{ptype}"]),),
+            dtype=[
+                ("id", np.int64),
+            ]
+            + [
+                (extra_field, float)
+                for extra_field in extra_fields
+                if extra_field in snep["fields_from_snap"]
+            ],
+        )
+        snap_db["id"] = snep[f"snap_ids_{ptype}"]
+        for extra_field in extra_fields:
+            if extra_field not in snep["fields_from_snap"]:
+                continue
+            snap_db[extra_field] = snep[f"{extra_field}_{ptype}"]
     db = np.recarray(
         (dbsize,),
         dtype=[
@@ -72,7 +90,11 @@ def _db(
             ("z", float),
             ("m", float),
         ]
-        + [(extra_field, float) for extra_field in extra_fields],
+        + [
+            (extra_field, float)
+            for extra_field in extra_fields
+            if extra_field not in snep["fields_from_snap"]
+        ],
     )
     db["id"] = snep[f"ids_{ptype}"][boxmask]
     db["x"] = snep[f"xyz_{ptype}"][:, 0][boxmask]
@@ -80,6 +102,8 @@ def _db(
     db["z"] = snep[f"xyz_{ptype}"][:, 2][boxmask]
     db["m"] = snep[f"m_{ptype}"][boxmask]
     for extra_field in extra_fields:
+        if extra_field in snep["fields_from_snap"]:
+            continue
         db[extra_field] = snep[f"{extra_field}_{ptype}"][boxmask]
     if (fade_beyond is not None) and (fade_centre is not None):
         r = np.sqrt(
@@ -90,7 +114,11 @@ def _db(
         )
         fbmask = r > fade_beyond
         db["m"][fbmask] = db["m"][fbmask] * np.exp(-(r[fbmask] / fade_beyond - 1))
-    return pandas.DataFrame(db)
+    db = pandas.DataFrame(db)
+    if len(snep["fields_from_snap"]) > 0:
+        snap_db = pandas.DataFrame(snap_db)
+        db = pandas.merge(db, snap_db, how="inner", on="id", suffixes=("", "_snap"))
+    return db
 
 
 class snep_interpolator(object):
@@ -149,13 +177,21 @@ class snep_interpolator(object):
         return
 
     def _loadsnep(
-        self, snep, buffer="later", ptype="dm", is_snip=False, extra_fields=tuple()
+        self,
+        snep,
+        snap,
+        buffer="later",
+        ptype="dm",
+        is_snip=False,
+        extra_fields=tuple(),
     ):
         if is_snip:
             mysnep = snip_id(*self.res_phys_vol, snip=snep, is_snip=True)
         else:
             mysnep = snap_id(*self.res_phys_vol, snap=snep)
+        mysnap = snap_id(*self.res_phys_vol, snap=snap)
         SF = SimFiles(mysnep, configfile=SFcfg, ncpu=self.ncpu)
+        SF_snap = SimFiles(mysnap, configfile=SFcfg, ncpu=self.ncpu)
 
         data = dict(snep=snep, ptype=ptype, is_snip=is_snip)
         SF.load(("a", "Lbox"), verbose=False)
@@ -190,9 +226,20 @@ class snep_interpolator(object):
             data["xyz_s"][data["xyz_s"] < 0] += Lbox
         else:
             raise ValueError
+        data["fields_from_snap"] = list()
         for extra_field in extra_fields:
-            SF.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
-            data[f"{extra_field}_{ptype}"] = SF[f"{extra_field}_{ptype}"]
+            try:
+                SF.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
+            except KeyError:
+                data["fields_from_snap"].append(extra_field)
+            else:
+                data[f"{extra_field}_{ptype}"] = SF[f"{extra_field}_{ptype}"]
+        if len(data["fields_from_snap"]) > 0:
+            SF_snap.load((f"ids_{ptype}",), verbose=self.verbose)
+            data[f"snap_ids_{ptype}"] = SF_snap[f"ids_{ptype}"]
+        for extra_field in data["fields_from_snap"]:
+            SF_snap.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
+            data[f"{extra_field}_{ptype}"] = SF_snap[f"{extra_field}_{ptype}"]
         if buffer == "earlier":
             self.earlier_snep = data
         elif buffer == "later":
@@ -223,6 +270,9 @@ class snep_interpolator(object):
     ):
         s0, s1, is0, is1, t0, t1 = get_snepshots_and_times(
             t, self.sneplist, self.timelist, self.snipflags
+        )
+        s0_snap, s1_snap, _, _, t0_snap, t1_snap = get_snepshots_and_times(
+            t, self.sneplist, self.timelist, self.snipflags, snap_only=True
         )
         # check if already has in memory
         if (
@@ -266,6 +316,7 @@ class snep_interpolator(object):
                 self.earlier_snep = self.later_snep
                 self._loadsnep(
                     s1,
+                    s1_snap,
                     buffer="later",
                     ptype=ptype,
                     is_snip=is1,
@@ -295,6 +346,7 @@ class snep_interpolator(object):
             else:
                 self._loadsnep(
                     s0,
+                    s0_snap,
                     buffer="earlier",
                     ptype=ptype,
                     is_snip=is0,
@@ -313,6 +365,7 @@ class snep_interpolator(object):
                     self._unload(0)
                 self._loadsnep(
                     s1,
+                    s1_snap,
                     buffer="later",
                     ptype=ptype,
                     is_snip=is1,
@@ -350,10 +403,15 @@ class snep_interpolator(object):
             t1 - t0
         )
 
+        interpolated_extra_fields = dict()
+        for q in extra_fields:
+            t0_xf = t0_snap if q in self.earlier_snep["fields_from_snap"] else t0
+            t1_xf = t1_snap if q in self.later_snep["fields_from_snap"] else t1
+            interpolated_extra_fields[q] = self.interpolate_scalar(q, t, t0_xf, t1_xf)
         return dict(
             xyz=xyz,
             m=self.interpolate_scalar("m", t, t0, t1),
-            **{q: self.interpolate_scalar(q, t, t0, t1) for q in extra_fields},
+            **interpolated_extra_fields,
         )
 
     def interpolate_scalar(self, q, t, t0, t1):
