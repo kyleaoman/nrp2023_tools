@@ -148,7 +148,9 @@ class snep_interpolator(object):
 
         return
 
-    def _loadsnep(self, snep, buffer="later", ptype="dm", is_snip=False, extra_fields=tuple()):
+    def _loadsnep(
+        self, snep, buffer="later", ptype="dm", is_snip=False, extra_fields=tuple()
+    ):
         if is_snip:
             mysnep = snip_id(*self.res_phys_vol, snip=snep, is_snip=True)
         else:
@@ -189,7 +191,7 @@ class snep_interpolator(object):
         else:
             raise ValueError
         for extra_field in extra_fields:
-            SF.load((f"{extra_field}_{ptype}", ), verbose=self.verbose)
+            SF.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
             data[f"{extra_field}_{ptype}"] = SF[f"{extra_field}_{ptype}"]
         if buffer == "earlier":
             self.earlier_snep = data
@@ -262,7 +264,13 @@ class snep_interpolator(object):
                 and (self.later_snep["is_snip"] == is0)
             ):
                 self.earlier_snep = self.later_snep
-                self._loadsnep(s1, buffer="later", ptype=ptype, is_snip=is1, extra_fields=extra_fields)
+                self._loadsnep(
+                    s1,
+                    buffer="later",
+                    ptype=ptype,
+                    is_snip=is1,
+                    extra_fields=extra_fields,
+                )
                 db0 = _db(
                     self.earlier_snep,
                     ptype=ptype,
@@ -285,7 +293,13 @@ class snep_interpolator(object):
                     self._unload(0)
                     self._unload(1)
             else:
-                self._loadsnep(s0, buffer="earlier", ptype=ptype, is_snip=is0, extra_fields=extra_fields)
+                self._loadsnep(
+                    s0,
+                    buffer="earlier",
+                    ptype=ptype,
+                    is_snip=is0,
+                    extra_fields=extra_fields,
+                )
                 db0 = _db(
                     self.earlier_snep,
                     ptype=ptype,
@@ -297,7 +311,13 @@ class snep_interpolator(object):
                 )
                 if unload:
                     self._unload(0)
-                self._loadsnep(s1, buffer="later", ptype=ptype, is_snip=is1, extra_fields=extra_fields)
+                self._loadsnep(
+                    s1,
+                    buffer="later",
+                    ptype=ptype,
+                    is_snip=is1,
+                    extra_fields=extra_fields,
+                )
                 db1 = _db(
                     self.later_snep,
                     ptype=ptype,
