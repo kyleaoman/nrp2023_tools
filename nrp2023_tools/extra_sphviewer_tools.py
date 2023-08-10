@@ -163,9 +163,11 @@ class snep_interpolator(object):
                         a = f["Header"].attrs["Time"]
                 except OSError:
                     continue
-                timelist.append(a)
-                sneplist.append(s)
-                snipflags.append(1)
+                if a not in timelist:
+                    # don't including snips at the same time as snaps (a=1, usually)
+                    timelist.append(a)
+                    sneplist.append(s)
+                    snipflags.append(1)
         self.timelist = np.array(timelist)
         self.sneplist = np.array(sneplist)
         self.snipflags = np.array(snipflags)  # 0 if snap, 1 if snip
