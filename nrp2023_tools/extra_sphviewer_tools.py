@@ -229,23 +229,31 @@ class snep_interpolator(object):
         else:
             raise ValueError
         data["fields_from_snap"] = list()
+        t0 = datetime.now()
         for extra_field in extra_fields:
-            try:
-                SF.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
-            except KeyError:
-                data["fields_from_snap"].append(extra_field)
-            else:
+            if hasattr(SF, f"{extra_field}_{ptype}"):
                 data[f"{extra_field}_{ptype}"] = SF[f"{extra_field}_{ptype}"]
+            else:
+                try:
+                    SF.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
+                except KeyError:
+                    data["fields_from_snap"].append(extra_field)
+                else:
+                    data[f"{extra_field}_{ptype}"] = SF[f"{extra_field}_{ptype}"]
         if len(data["fields_from_snap"]) > 0:
-            SF_snap.load((f"ids_{ptype}",), verbose=self.verbose)
+            if not hasattr(SF_snap, f"ids_{ptype}"):
+                SF_snap.load((f"ids_{ptype}",), verbose=self.verbose)
             data[f"snap_ids_{ptype}"] = SF_snap[f"ids_{ptype}"]
         for extra_field in data["fields_from_snap"]:
-            SF_snap.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
+            if not hasattr(SF_snap, f"{extra_field}_{ptype}"):
+                SF_snap.load((f"{extra_field}_{ptype}",), verbose=self.verbose)
             data[f"{extra_field}_{ptype}"] = SF_snap[f"{extra_field}_{ptype}"]
         if buffer == "earlier":
             self.earlier_snep = data
         elif buffer == "later":
             self.later_snep = data
+        t1 = datetime.now()
+        print(f"        reading extra_fields for snep {snep} took:", t1 - t0)
         return
 
     def _unload(self, buf):
@@ -385,12 +393,12 @@ class snep_interpolator(object):
                 if unload:
                     self._unload(1)
             if self.verbose:
-                print("Merging snapshots...")
+                print("Merging snapshots...", datetime.now())
             self.db = pandas.merge(
                 db0, db1, how="inner", on="id", suffixes=("_earlier", "_later")
             )
             if self.verbose:
-                print("Merge complete.")
+                print("Merge complete.", datetime.now())
         xyz = np.vstack(
             (self.db["x_earlier"], self.db["y_earlier"], self.db["z_earlier"])
         ).T + np.vstack(
@@ -678,10 +686,10 @@ def make_frames_face_and_edge(
                     fade_centre=CI(camera_location["sim_times"]),
                 )
                 if verbose:
-                    print("Starting rendering.")
+                    print("Starting rendering.", datetime.now())
                 img_arrs = render_function(pdata, camera_location)
                 if verbose:
-                    print("Rendering finished.")
+                    print("Rendering finished.", datetime.now())
 
                 print(f"saving frame {h} {alignment}-on ({ptype})", datetime.now())
                 for fnum, img_arr in enumerate(img_arrs):
