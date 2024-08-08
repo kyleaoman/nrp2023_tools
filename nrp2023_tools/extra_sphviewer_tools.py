@@ -698,6 +698,7 @@ def make_frames_face_and_edge(
                 print(f"skipping {img_arr_file}, already exists")
 
     print("finished:", datetime.now())
+    return camera_trajectory
 
 
 def find_close_particles(N, coords):
