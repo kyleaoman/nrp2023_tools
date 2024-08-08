@@ -53,8 +53,7 @@ def _db(
     extra_fields=tuple(),
     box_centre=None,
     box_halflength=None,
-    fade_beyond=None,
-    fade_centre=None,
+    fade_function=None,
 ):
     if (box_centre is not None) and (box_halflength is not None):
         boxmask = np.all(
@@ -105,15 +104,7 @@ def _db(
         if extra_field in snep["fields_from_snap"]:
             continue
         db[extra_field] = snep[f"{extra_field}_{ptype}"][boxmask]
-    if (fade_beyond is not None) and (fade_centre is not None):
-        r = np.sqrt(
-            np.sum(
-                np.power(snep[f"xyz_{ptype}"][boxmask] - fade_centre, 2),
-                axis=1,
-            )
-        )
-        fbmask = r > fade_beyond
-        db["m"][fbmask] = db["m"][fbmask] * np.exp(-(r[fbmask] / fade_beyond - 1))
+    db = fade_function(db)
     db = pandas.DataFrame(db)
     if len(snep["fields_from_snap"]) > 0:
         snap_db = pandas.DataFrame(snap_db)
@@ -274,8 +265,7 @@ class snep_interpolator(object):
         extra_fields=tuple(),
         box_centre=None,
         box_halflength=None,
-        fade_beyond=None,
-        fade_centre=None,
+        fade_function=None,
         unload=False,
     ):
         s0, s1, is0, is1, t0, t1 = get_snepshots_and_times(
@@ -301,8 +291,7 @@ class snep_interpolator(object):
                 extra_fields=extra_fields,
                 box_centre=box_centre,
                 box_halflength=box_halflength,
-                fade_beyond=fade_beyond,
-                fade_centre=fade_centre,
+                fade_function=lambda pdata: fade_function(pdata, box_centre),
             )
             db1 = _db(
                 self.later_snep,
@@ -310,8 +299,7 @@ class snep_interpolator(object):
                 extra_fields=extra_fields,
                 box_centre=box_centre,
                 box_halflength=box_halflength,
-                fade_beyond=fade_beyond,
-                fade_centre=fade_centre,
+                fade_function=lambda pdata: fade_function(pdata, box_centre),
             )
             if unload:
                 self._unload(0)
@@ -338,8 +326,7 @@ class snep_interpolator(object):
                     extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
-                    fade_beyond=fade_beyond,
-                    fade_centre=fade_centre,
+                    fade_function=lambda pdata: fade_function(pdata, box_centre),
                 )
                 db1 = _db(
                     self.later_snep,
@@ -347,8 +334,7 @@ class snep_interpolator(object):
                     extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
-                    fade_beyond=fade_beyond,
-                    fade_centre=fade_centre,
+                    fade_function=lambda pdata: fade_function(pdata, box_centre),
                 )
                 if unload:
                     self._unload(0)
@@ -368,8 +354,7 @@ class snep_interpolator(object):
                     extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
-                    fade_beyond=fade_beyond,
-                    fade_centre=fade_centre,
+                    fade_function=lambda pdata: fade_function(pdata, box_centre),
                 )
                 if unload:
                     self._unload(0)
@@ -387,8 +372,7 @@ class snep_interpolator(object):
                     extra_fields=extra_fields,
                     box_centre=box_centre,
                     box_halflength=box_halflength,
-                    fade_beyond=fade_beyond,
-                    fade_centre=fade_centre,
+                    fade_function=lambda pdata: fade_function(pdata, box_centre),
                 )
                 if unload:
                     self._unload(1)
@@ -577,6 +561,23 @@ def default_render(pdata, camera_location):
     return (img_arr,)
 
 
+def default_fade(pdata, centre, camera_location, fade_beyond=50):
+    if (fade_beyond is not None) and (centre is not None):
+        xyz = np.vstack((pdata["x"], pdata["y"], pdata["z"])).T
+        r = np.sqrt(
+            np.sum(
+                np.power(xyz - centre, 2),
+                axis=1,
+            )
+        )
+        fade_mask = r > fade_beyond
+        pdata["m"][fade_mask] = (
+            pdata["m"][fade_mask] * np.exp(-(r[fade_mask] / fade_beyond - 1))
+        )
+        print(f"faded {fade_mask.sum()}")
+    return pdata
+
+
 def make_frames_face_and_edge(
     res_phys_vol=None,
     fof_sub=None,
@@ -584,6 +585,7 @@ def make_frames_face_and_edge(
     extra_fields=tuple(),
     save_dir="out",
     render_function=default_render,
+    fade_function=default_fade,
     r=100,
     npixels_x=1000,
     npixels_y=1000,
@@ -682,11 +684,11 @@ def make_frames_face_and_edge(
                     extra_fields=extra_fields,
                     box_centre=CI(camera_location["sim_times"]),
                     box_halflength=50 * 7,  # exp(-7)~1E-3
-                    fade_beyond=50,
-                    fade_centre=CI(camera_location["sim_times"]),
+                    fade_function=lambda pdata, centre: fade_function(pdata, centre, camera_location),
                 )
                 if verbose:
                     print("Starting rendering.", datetime.now())
+                # SHOULD THIS BE `CI(camera_location)`??:
                 img_arrs = render_function(pdata, camera_location)
                 if verbose:
                     print("Rendering finished.", datetime.now())
