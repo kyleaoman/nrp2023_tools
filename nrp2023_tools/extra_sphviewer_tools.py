@@ -571,10 +571,9 @@ def default_fade(pdata, centre, camera_location, fade_beyond=50):
             )
         )
         fade_mask = r > fade_beyond
-        pdata["m"][fade_mask] = (
-            pdata["m"][fade_mask] * np.exp(-(r[fade_mask] / fade_beyond - 1))
+        pdata["m"][fade_mask] = pdata["m"][fade_mask] * np.exp(
+            -(r[fade_mask] / fade_beyond - 1)
         )
-        print(f"faded {fade_mask.sum()}")
     return pdata
 
 
@@ -684,7 +683,9 @@ def make_frames_face_and_edge(
                     extra_fields=extra_fields,
                     box_centre=CI(camera_location["sim_times"]),
                     box_halflength=50 * 7,  # exp(-7)~1E-3
-                    fade_function=lambda pdata, centre: fade_function(pdata, centre, camera_location),
+                    fade_function=lambda pdata, centre: fade_function(
+                        pdata, centre, camera_location
+                    ),
                 )
                 if verbose:
                     print("Starting rendering.", datetime.now())
